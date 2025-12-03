@@ -1,0 +1,116 @@
+pipeline {
+    agent any
+
+    environment {
+        // Use podman or docker depending on what's available in your Jenkins container
+        CONTAINER_RUNTIME = 'podman' // Change to 'docker' if using Docker
+        IMAGE_NAME = 'simplereact-app'
+        IMAGE_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+        CONTAINER_NAME = "simplereact-${env.BRANCH_NAME}".replaceAll('/', '-')
+        APP_PORT = '3003'
+        // Dynamic host port based on branch to avoid conflicts
+        HOST_PORT = "${env.BRANCH_NAME == 'main' ? '3003' : '3103'}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "Building branch: ${env.BRANCH_NAME}"
+                echo "Build number: ${env.BUILD_NUMBER}"
+                // Multibranch pipeline automatically checks out the code
+                // No need for explicit git clone
+            }
+        }
+
+        stage('Build Container Image') {
+            steps {
+                script {
+                    echo "Building container image: ${IMAGE_NAME}:${IMAGE_TAG}"
+                    sh """
+                        ${CONTAINER_RUNTIME} build -f Containerfile -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                        ${CONTAINER_RUNTIME} tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${env.BRANCH_NAME}-latest
+                    """
+                }
+            }
+        }
+
+        stage('Stop Old Container') {
+            steps {
+                script {
+                    echo "Stopping and removing old container if exists: ${CONTAINER_NAME}"
+                    sh """
+                        ${CONTAINER_RUNTIME} stop ${CONTAINER_NAME} || true
+                        ${CONTAINER_RUNTIME} rm ${CONTAINER_NAME} || true
+                    """
+                }
+            }
+        }
+
+        stage('Deploy Container') {
+            steps {
+                script {
+                    echo "Deploying container on port ${HOST_PORT}"
+                    sh """
+                        ${CONTAINER_RUNTIME} run -d \
+                            --name ${CONTAINER_NAME} \
+                            -p ${HOST_PORT}:${APP_PORT} \
+                            --restart unless-stopped \
+                            ${IMAGE_NAME}:${IMAGE_TAG}
+                    """
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    echo "Verifying container is running"
+                    sh """
+                        sleep 5
+                        ${CONTAINER_RUNTIME} ps | grep ${CONTAINER_NAME}
+                        ${CONTAINER_RUNTIME} logs ${CONTAINER_NAME} --tail 20
+                    """
+                }
+            }
+        }
+
+        stage('Cleanup Old Images') {
+            steps {
+                script {
+                    echo "Cleaning up old images, keeping last 3 builds"
+                    sh """
+                        # Keep only the 3 most recent images for this branch
+                        ${CONTAINER_RUNTIME} images ${IMAGE_NAME} --format "{{.Tag}}" | \
+                        grep "^${env.BRANCH_NAME}-" | \
+                        sort -t- -k2 -rn | \
+                        tail -n +4 | \
+                        xargs -r -I {} ${CONTAINER_RUNTIME} rmi ${IMAGE_NAME}:{} || true
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo """
+            ================================
+            Deployment Successful!
+            ================================
+            Branch: ${env.BRANCH_NAME}
+            Build: ${env.BUILD_NUMBER}
+            Image: ${IMAGE_NAME}:${IMAGE_TAG}
+            Container: ${CONTAINER_NAME}
+            Access URL: http://localhost:${HOST_PORT}
+            ================================
+            """
+        }
+        failure {
+            echo "Pipeline failed for branch ${env.BRANCH_NAME}!"
+            sh "${CONTAINER_RUNTIME} logs ${CONTAINER_NAME} --tail 50 || true"
+        }
+        always {
+            echo "Pipeline completed for branch: ${env.BRANCH_NAME}"
+        }
+    }
+}

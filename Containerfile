@@ -10,6 +10,9 @@
    # Install project dependencies
    RUN npm install
 
+   RUN apk add curl
+   RUN apk add nano
+
    # Copy the rest of the application code
    COPY . .
 
