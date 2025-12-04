@@ -2,14 +2,9 @@ pipeline {
     agent any
 
     environment {
-        // Use podman or docker depending on what's available in your Jenkins container
-        CONTAINER_RUNTIME = 'podman' // Change to 'docker' if using Docker
-        IMAGE_NAME = 'simplereact-app'
-        IMAGE_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
-        CONTAINER_NAME = "simplereact-${env.BRANCH_NAME}".replaceAll('/', '-')
-        APP_PORT = '3003'
-        // Dynamic host port based on branch to avoid conflicts
-        HOST_PORT = "${env.BRANCH_NAME == 'main' ? '3003' : '3103'}"
+        BRANCH_NAME_SAFE = "${env.BRANCH_NAME}".replaceAll('/', '-')
+        DEPLOY_DIR = "/tmp/deployments/${BRANCH_NAME_SAFE}"
+        BUILD_INFO = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
     }
 
     stages {
@@ -18,44 +13,35 @@ pipeline {
                 echo "Building branch: ${env.BRANCH_NAME}"
                 echo "Build number: ${env.BUILD_NUMBER}"
                 // Multibranch pipeline automatically checks out the code
-                // No need for explicit git clone
             }
         }
 
-        stage('Build Container Image') {
+        stage('Prepare Deployment Directory') {
             steps {
                 script {
-                    echo "Building container image: ${IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "Preparing deployment directory: ${DEPLOY_DIR}"
                     sh """
-                        ${CONTAINER_RUNTIME} build -f Containerfile -t ${IMAGE_NAME}:${IMAGE_TAG} .
-                        ${CONTAINER_RUNTIME} tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${env.BRANCH_NAME}-latest
+                        mkdir -p ${DEPLOY_DIR}
+                        echo "Deployment for ${BUILD_INFO}" > ${DEPLOY_DIR}/deployment-info.txt
+                        echo "Timestamp: \$(date)" >> ${DEPLOY_DIR}/deployment-info.txt
                     """
                 }
             }
         }
 
-        stage('Stop Old Container') {
+        stage('Deploy') {
             steps {
                 script {
-                    echo "Stopping and removing old container if exists: ${CONTAINER_NAME}"
+                    echo "Simulating deployment by moving Checkfile.txt"
                     sh """
-                        ${CONTAINER_RUNTIME} stop ${CONTAINER_NAME} || true
-                        ${CONTAINER_RUNTIME} rm ${CONTAINER_NAME} || true
-                    """
-                }
-            }
-        }
-
-        stage('Deploy Container') {
-            steps {
-                script {
-                    echo "Deploying container on port ${HOST_PORT}"
-                    sh """
-                        ${CONTAINER_RUNTIME} run -d \
-                            --name ${CONTAINER_NAME} \
-                            -p ${HOST_PORT}:${APP_PORT} \
-                            --restart unless-stopped \
-                            ${IMAGE_NAME}:${IMAGE_TAG}
+                        if [ -f Checkfile.txt ]; then
+                            cp Checkfile.txt ${DEPLOY_DIR}/Checkfile-${BUILD_INFO}.txt
+                            echo "Checkfile.txt copied to ${DEPLOY_DIR}"
+                            ls -la ${DEPLOY_DIR}
+                        else
+                            echo "ERROR: Checkfile.txt not found in workspace!"
+                            exit 1
+                        fi
                     """
                 }
             }
@@ -64,27 +50,13 @@ pipeline {
         stage('Verify Deployment') {
             steps {
                 script {
-                    echo "Verifying container is running"
+                    echo "Verifying deployment"
                     sh """
-                        sleep 5
-                        ${CONTAINER_RUNTIME} ps | grep ${CONTAINER_NAME}
-                        ${CONTAINER_RUNTIME} logs ${CONTAINER_NAME} --tail 20
-                    """
-                }
-            }
-        }
-
-        stage('Cleanup Old Images') {
-            steps {
-                script {
-                    echo "Cleaning up old images, keeping last 3 builds"
-                    sh """
-                        # Keep only the 3 most recent images for this branch
-                        ${CONTAINER_RUNTIME} images ${IMAGE_NAME} --format "{{.Tag}}" | \
-                        grep "^${env.BRANCH_NAME}-" | \
-                        sort -t- -k2 -rn | \
-                        tail -n +4 | \
-                        xargs -r -I {} ${CONTAINER_RUNTIME} rmi ${IMAGE_NAME}:{} || true
+                        echo "Contents of deployment directory:"
+                        ls -la ${DEPLOY_DIR}
+                        echo ""
+                        echo "Deployment info:"
+                        cat ${DEPLOY_DIR}/deployment-info.txt
                     """
                 }
             }
@@ -99,15 +71,13 @@ pipeline {
             ================================
             Branch: ${env.BRANCH_NAME}
             Build: ${env.BUILD_NUMBER}
-            Image: ${IMAGE_NAME}:${IMAGE_TAG}
-            Container: ${CONTAINER_NAME}
-            Access URL: http://localhost:${HOST_PORT}
+            Deployed to: ${DEPLOY_DIR}
+            File: Checkfile-${BUILD_INFO}.txt
             ================================
             """
         }
         failure {
             echo "Pipeline failed for branch ${env.BRANCH_NAME}!"
-            sh "${CONTAINER_RUNTIME} logs ${CONTAINER_NAME} --tail 50 || true"
         }
         always {
             echo "Pipeline completed for branch: ${env.BRANCH_NAME}"
