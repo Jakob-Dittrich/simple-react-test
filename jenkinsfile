@@ -80,7 +80,7 @@ pipeline {
                         echo "Code Changes Detected: ${HAS_CHANGES}" >> ${DEPLOY_DIR}/deployment-info.txt
                         echo "" >> ${DEPLOY_DIR}/deployment-info.txt
                         echo "Current Commit: ${CURRENT_COMMIT}" >> ${DEPLOY_DIR}/deployment-info.txt
-                        echo "Previous Commit: ${LAST_COMMIT:-none}" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "Previous Commit: \${LAST_COMMIT:-none}" >> ${DEPLOY_DIR}/deployment-info.txt
                         echo "" >> ${DEPLOY_DIR}/deployment-info.txt
                         echo "Latest Git Commit:" >> ${DEPLOY_DIR}/deployment-info.txt
                         git log -1 --pretty=format:"  Commit: %H%n  Author: %an <%ae>%n  Date: %ai%n  Message: %s%n" >> ${DEPLOY_DIR}/deployment-info.txt
