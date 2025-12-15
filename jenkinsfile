@@ -42,6 +42,25 @@ pipeline {
                         if (lastCommit != currentCommit) {
                             hasChanges = true
                             triggerType = "CODE_CHANGE"
+                        }
+                    } else {
+                        hasChanges = true
+                        triggerType = "FIRST_DEPLOYMENT"
+                    }
+                    
+                    env.CURRENT_COMMIT = currentCommit
+                    env.LAST_COMMIT = lastCommit
+                    env.HAS_CHANGES = hasChanges.toString()
+                    env.TRIGGER_TYPE = triggerType
+                    
+                    echo "Current commit: ${currentCommit}"
+                    echo "Last deployed commit: ${lastCommit ?: 'none'}"
+                    echo "Has changes: ${hasChanges}"
+                    echo "Trigger type: ${triggerType}"
+                }
+            }
+        }
+
         stage('Prepare Deployment Directory') {
             steps {
                 script {
