@@ -33,9 +33,10 @@ pipeline {
             steps {
                 script {
                     echo "Simulating deployment by moving Checkfile.txt"
+                    // -${BUILD_INFO}.txt
                     sh """
                         if [ -f Checkfile.txt ]; then
-                            cp Checkfile.txt ${DEPLOY_DIR}/Checkfile-${BUILD_INFO}.txt
+                            cp Checkfile.txt ${DEPLOY_DIR}/Checkfile.txt
                             echo "Checkfile.txt copied to ${DEPLOY_DIR}"
                             ls -la ${DEPLOY_DIR}
                         else
