@@ -2,13 +2,14 @@ pipeline {
     agent any
 
     triggers {
-        cron('H/2 * * * *')  // Run every 2 minutes automatically
+        cron('H/10 * * * *')  // Run every 10 minutes automatically
     }
 
     environment {
         BRANCH_NAME_SAFE = "${env.BRANCH_NAME}".replaceAll('/', '-')
         DEPLOY_DIR = "/tmp/deployments/${BRANCH_NAME_SAFE}"
         BUILD_INFO = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+        LAST_COMMIT_FILE = "/tmp/deployments/${BRANCH_NAME_SAFE}/.last_commit"
     }
 
     stages {
@@ -24,24 +25,23 @@ pipeline {
             steps {
                 script {
                     echo "Checking for changes since last deployment"
-                    def hasChanges = sh(
-                        script: '''
-                            if [ -f .git/refs/heads/${BRANCH_NAME} ]; then
-                                # Get last commit info
-                                git log -1 --pretty=format:"%H|%an|%ae|%ai|%s"
-                            else
-                                echo "NEW_BRANCH"
-                            fi
-                        ''',
+                    
+                    // Get current commit hash
+                    def currentCommit = sh(
+                        script: 'git rev-parse HEAD',
                         returnStdout: true
                     ).trim()
                     
-                    env.GIT_COMMIT_INFO = hasChanges
-                    echo "Latest commit info: ${hasChanges}"
-                }
-            }
-        }
-
+                    // Check if there were changes since last deployment
+                    def lastCommit = ""
+                    def hasChanges = false
+                    def triggerType = "SCHEDULED"
+                    
+                    if (fileExists("${LAST_COMMIT_FILE}")) {
+                        lastCommit = readFile("${LAST_COMMIT_FILE}").trim()
+                        if (lastCommit != currentCommit) {
+                            hasChanges = true
+                            triggerType = "CODE_CHANGE"
         stage('Prepare Deployment Directory') {
             steps {
                 script {
@@ -55,8 +55,13 @@ pipeline {
                         echo "====================================" >> ${DEPLOY_DIR}/deployment-info.txt
                         echo "Deployment ID: ${BUILD_INFO}" >> ${DEPLOY_DIR}/deployment-info.txt
                         echo "Deployment Time: \$(date)" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "Trigger Type: ${TRIGGER_TYPE}" >> ${DEPLOY_DIR}/deployment-info.txt
                         echo "Branch: ${BRANCH_NAME}" >> ${DEPLOY_DIR}/deployment-info.txt
                         echo "Build Number: ${BUILD_NUMBER}" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "Code Changes Detected: ${HAS_CHANGES}" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "Current Commit: ${CURRENT_COMMIT}" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "Previous Commit: ${LAST_COMMIT:-none}" >> ${DEPLOY_DIR}/deployment-info.txt
                         echo "" >> ${DEPLOY_DIR}/deployment-info.txt
                         echo "Latest Git Commit:" >> ${DEPLOY_DIR}/deployment-info.txt
                         git log -1 --pretty=format:"  Commit: %H%n  Author: %an <%ae>%n  Date: %ai%n  Message: %s%n" >> ${DEPLOY_DIR}/deployment-info.txt
@@ -64,7 +69,10 @@ pipeline {
                         echo "====================================" >> ${DEPLOY_DIR}/deployment-info.txt
                         
                         # Keep deployment history
-                        echo "\$(date) - Build #${BUILD_NUMBER} - \$(git log -1 --pretty=format:'%h - %s')" >> ${DEPLOY_DIR}/deployment-history.log
+                        echo "\$(date) - Build #${BUILD_NUMBER} - ${TRIGGER_TYPE} - \$(git log -1 --pretty=format:'%h - %s')" >> ${DEPLOY_DIR}/deployment-history.log
+                        
+                        # Save current commit for next comparison
+                        echo "${CURRENT_COMMIT}" > ${LAST_COMMIT_FILE}
                     """
                 }
             }
