@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    triggers {
+        cron('H/2 * * * *')  // Run every 2 minutes automatically
+    }
+
     environment {
         BRANCH_NAME_SAFE = "${env.BRANCH_NAME}".replaceAll('/', '-')
         DEPLOY_DIR = "/tmp/deployments/${BRANCH_NAME_SAFE}"
@@ -16,14 +20,51 @@ pipeline {
             }
         }
 
+        stage('Check for Changes') {
+            steps {
+                script {
+                    echo "Checking for changes since last deployment"
+                    def hasChanges = sh(
+                        script: '''
+                            if [ -f .git/refs/heads/${BRANCH_NAME} ]; then
+                                # Get last commit info
+                                git log -1 --pretty=format:"%H|%an|%ae|%ai|%s"
+                            else
+                                echo "NEW_BRANCH"
+                            fi
+                        ''',
+                        returnStdout: true
+                    ).trim()
+                    
+                    env.GIT_COMMIT_INFO = hasChanges
+                    echo "Latest commit info: ${hasChanges}"
+                }
+            }
+        }
+
         stage('Prepare Deployment Directory') {
             steps {
                 script {
                     echo "Preparing deployment directory: ${DEPLOY_DIR}"
                     sh """
                         mkdir -p ${DEPLOY_DIR}
-                        echo "Deployment for ${BUILD_INFO}" > ${DEPLOY_DIR}/deployment-info.txt
-                        echo "Timestamp: \$(date)" >> ${DEPLOY_DIR}/deployment-info.txt
+                        
+                        # Create deployment info file
+                        echo "====================================" > ${DEPLOY_DIR}/deployment-info.txt
+                        echo "Automatic Deployment Information" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "====================================" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "Deployment ID: ${BUILD_INFO}" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "Deployment Time: \$(date)" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "Branch: ${BRANCH_NAME}" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "Build Number: ${BUILD_NUMBER}" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "Latest Git Commit:" >> ${DEPLOY_DIR}/deployment-info.txt
+                        git log -1 --pretty=format:"  Commit: %H%n  Author: %an <%ae>%n  Date: %ai%n  Message: %s%n" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "" >> ${DEPLOY_DIR}/deployment-info.txt
+                        echo "====================================" >> ${DEPLOY_DIR}/deployment-info.txt
+                        
+                        # Keep deployment history
+                        echo "\$(date) - Build #${BUILD_NUMBER} - \$(git log -1 --pretty=format:'%h - %s')" >> ${DEPLOY_DIR}/deployment-history.log
                     """
                 }
             }
